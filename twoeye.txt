@@ -1,0 +1,213 @@
+Step 1: System Setup & Desktop Boot (If Needed)
+Update packages and install pygame (plus lightdm if starting from a minimal/Lite image):
+
+Bash
+sudo apt update && sudo apt install -y python3-pygame lightdm
+Enable Desktop Autologin so :0 is active on boot:
+
+Bash
+sudo raspi-config
+Go to System Options -> Boot / Auto Login -> Desktop Autologin, then reboot:
+
+Bash
+sudo reboot
+Verify the display is active after reboot:
+
+Bash
+kmsprint
+Confirm your display (HDMI-A-1, HDMI-A-2, or DSI-1) is listed as connected.
+
+Step 2: Complete Two Big Glowing Eyes Code (two_eyes.py)
+Save the full script below to /home/ducati/two_eyes.py:
+
+Bash
+nano ~/two_eyes.py
+Paste this complete code:
+
+Python
+import math
+import os
+import sys
+import time
+import pygame
+
+# Ensure display target is set when launched over SSH or background service
+os.environ.setdefault("DISPLAY", ":0")
+
+pygame.init()
+
+info = pygame.display.Info()
+width, height = info.current_w, info.current_h
+if width <= 0 or height <= 0:
+    width, height = 1024, 768
+
+screen = pygame.display.set_mode((width, height), pygame.FULLSCREEN)
+pygame.mouse.set_visible(False)
+clock = pygame.time.Clock()
+
+cy = height // 2
+
+# Bigger eyes spaced cleanly across the screen
+eye_w = int(width * 0.28)
+eye_h = int(height * 0.22)
+eye_spacing = int(width * 0.21)
+
+left_cx = width // 2 - eye_spacing
+right_cx = width // 2 + eye_spacing
+
+
+def draw_glowing_eye(surface, center_x, center_y, w, h, openness, glow_intensity):
+    """
+    openness: 0.0 (closed) to 1.0 (fully open)
+    glow_intensity: 0.0 (off) to 1.0 (full glow)
+    """
+    effective_h = max(2, int(h * openness * glow_intensity))
+
+    # Outer additive glow layer
+    glow_pad_x = 95
+    glow_pad_y = 75
+    gw = w + glow_pad_x * 2
+    gh = h + glow_pad_y * 2
+    glow_surf = pygame.Surface((gw, gh), pygame.SRCALPHA)
+
+    gcx, gcy = gw // 2, gh // 2
+
+    for step, alpha_base in [(48, 16), (28, 30), (12, 52)]:
+        alpha = int(alpha_base * glow_intensity * (0.25 + 0.75 * openness))
+        if alpha > 0:
+            pygame.draw.ellipse(
+                glow_surf,
+                (0, 220, 255, min(255, alpha)),
+                (
+                    gcx - (w // 2 + step),
+                    gcy - (effective_h // 2 + step // 2),
+                    w + step * 2,
+                    effective_h + step,
+                ),
+            )
+
+    surface.blit(
+        glow_surf,
+        (center_x - gcx, center_y - gcy),
+        special_flags=pygame.BLEND_RGBA_ADD,
+    )
+
+    if glow_intensity <= 0.02 or openness <= 0.02:
+        return
+
+    eye_rect = pygame.Rect(
+        center_x - w // 2,
+        center_y - effective_h // 2,
+        w,
+        effective_h,
+    )
+
+    bg_eye_color = (
+        int(10 * glow_intensity),
+        int(45 * glow_intensity),
+        int(65 * glow_intensity),
+    )
+    border_color = (
+        int(120 * glow_intensity),
+        int(245 * glow_intensity),
+        int(255 * glow_intensity),
+    )
+
+    pygame.draw.ellipse(surface, bg_eye_color, eye_rect)
+
+    # Iris, pupil, and highlight
+    iris_r = max(6, min(int(effective_h * 0.44), int(w * 0.19)))
+    pupil_r = max(3, int(iris_r * 0.46))
+
+    iris_color = (
+        int(0 * glow_intensity),
+        int(210 * glow_intensity),
+        int(255 * glow_intensity),
+    )
+    core_color = (
+        int(225 * glow_intensity),
+        int(255 * glow_intensity),
+        int(255 * glow_intensity),
+    )
+    pupil_color = (5, 10, 18)
+
+    pygame.draw.circle(surface, iris_color, (center_x, center_y), iris_r)
+    pygame.draw.circle(surface, pupil_color, (center_x, center_y), pupil_r)
+    pygame.draw.circle(
+        surface,
+        core_color,
+        (center_x - max(2, iris_r // 3), center_y - max(2, iris_r // 3)),
+        max(2, pupil_r // 2),
+    )
+
+    pygame.draw.ellipse(surface, border_color, eye_rect, width=4)
+
+
+def main():
+    start_time = time.time()
+
+    while True:
+        for event in pygame.event.get():
+            if event.type in (pygame.KEYDOWN, pygame.MOUSEBUTTONDOWN, pygame.QUIT):
+                pygame.quit()
+                sys.exit()
+
+        t = time.time() - start_time
+        cycle = t % 6.0
+
+        # 0.0 - 2.5s: ON with gentle breathing glow
+        # 2.5 - 3.0s: Close & power down
+        # 3.0 - 4.5s: OFF
+        # 4.5 - 5.2s: Power-on fade & open
+        # 5.2 - 6.0s: ON steady breathing glow
+        if cycle < 2.5:
+            openness = 1.0
+            glow = 0.78 + 0.22 * math.sin(t * 4.0)
+        elif cycle < 3.0:
+            p = (cycle - 2.5) / 0.5
+            openness = max(0.0, 1.0 - p)
+            glow = max(0.0, 1.0 - p)
+        elif cycle < 4.5:
+            openness = 0.0
+            glow = 0.0
+        elif cycle < 5.2:
+            p = (cycle - 4.5) / 0.7
+            openness = min(1.0, p)
+            glow = min(1.0, p)
+        else:
+            openness = 1.0
+            glow = 0.82 + 0.18 * math.sin(t * 4.0)
+
+        screen.fill((5, 7, 12))
+        draw_glowing_eye(screen, left_cx, cy, eye_w, eye_h, openness, glow)
+        draw_glowing_eye(screen, right_cx, cy, eye_w, eye_h, openness, glow)
+        pygame.display.flip()
+        clock.tick(60)
+
+
+if __name__ == "__main__":
+    try:
+        main()
+    except KeyboardInterrupt:
+        pygame.quit()
+        sys.exit()
+Step 3: Run & Optional Autostart on Boot
+Run from Pi Desktop terminal:
+
+Bash
+python3 ~/two_eyes.py
+Run over SSH onto the 7-inch TFT:
+
+Bash
+DISPLAY=:0 python3 ~/two_eyes.py
+Auto-start when the Pi boots into Desktop (optional):
+
+Bash
+mkdir -p ~/.config/autostart
+cat << 'EOF' > ~/.config/autostart/two_eyes.desktop
+[Desktop Entry]
+Type=Application
+Name=Glowing Eyes TFT
+Exec=/usr/bin/python3 /home/ducati/two_eyes.py
+EOF
+Tap the screen, press any key, or press Ctrl+C in the terminal whenever you want to exit.
