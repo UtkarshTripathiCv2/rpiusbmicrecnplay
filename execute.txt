@@ -1,0 +1,11 @@
+lsusb
+
+arecord -l
+
+arecord -D plughw:3,0 -f cd -d 5 test.wav
+
+aplay test.wav
+
+
+
+sound level---arecord -D plughw:3,0 -f cd -vvv /dev/null   real time
